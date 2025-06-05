@@ -50,7 +50,8 @@ def token_required(f):
 
         try:
             data = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
-            
+            request.current_user_id = data.get('user_id')
+
             # `user_id`를 ObjectId로 변환
             try:
                 user_id = ObjectId(data['user_id'])
