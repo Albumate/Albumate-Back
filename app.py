@@ -23,6 +23,8 @@ authorizations = {
     }
 }
 
+app.config['RESTX_MASK_SWAGGER'] = False # 필드 마스크 비활성화
+
 api = Api(
     app,
     version='0.1',
