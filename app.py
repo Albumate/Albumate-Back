@@ -3,6 +3,7 @@ from pymongo import MongoClient
 from flask_restx import Api
 from routes import auth
 from routes import photo
+from routes import album
 from dotenv import load_dotenv
 import os
 
@@ -37,8 +38,8 @@ api = Api(
     mask=False          # 필드 마스크 비활성화
 )
 
-api.add_namespace(auth.auth_ns, path='/api/users')
-# api.add_namespace(album.album_ns, path='/api/albums')
+api.add_namespace(auth.auth_ns, path='/api/auth')
+api.add_namespace(album.album_ns, path='/api/albums')
 api.add_namespace(photo.photo_ns, path='/api/photos')
 
 @app.route('/')
