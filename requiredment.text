@@ -1,0 +1,3 @@
+pip show flask
+pip show pymongo
+pip show flask-restx
