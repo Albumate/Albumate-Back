@@ -6,7 +6,7 @@ from routes import photo
 from routes import album
 from dotenv import load_dotenv
 import os
-from flask import render_template
+from flask import render_template, send_from_directory
 
 app = Flask(__name__)
 
@@ -70,6 +70,15 @@ def album_detail_page(album_id):
 @app.route("/photo/<photo_id>")
 def photo_detail_page(photo_id):
     return render_template("photo.html", photo_id=photo_id)
+
+@app.route("/invitations")
+def invitations_page():
+    return render_template("invitations.html")
+
+@app.route('/uploads/<path:filename>')
+def uploaded_file(filename):
+    uploads_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'uploads'))
+    return send_from_directory(uploads_dir, filename)
 
 if __name__ == '__main__':
     app.run(debug=True)
