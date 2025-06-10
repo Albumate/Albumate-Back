@@ -182,3 +182,21 @@ class EmailCheck(Resource):
         if user_service.find_by_username(email):
             return {'code': 409, 'message': '이미 사용 중인 이메일입니다.'}, 409
         return {'code': 200, 'message': '사용 가능한 이메일입니다.'}, 200
+
+@auth_ns.route('/<string:user_id>')
+class UserInfo(Resource):
+    def get(self, user_id):
+        try:
+            user = user_service.collection.find_one({'_id': ObjectId(user_id)})
+        except Exception:
+            return {'code': 400, 'message': '유효하지 않은 user_id'}, 400
+        if not user:
+            return {'code': 404, 'message': '유저를 찾을 수 없습니다.'}, 404
+        return {
+            'code': 200,
+            'message': '유저 정보 조회 성공',
+            'data': {
+                'nickname': user.get('nickname', ''),
+                'email': user.get('username', '')
+            }
+        }, 200
