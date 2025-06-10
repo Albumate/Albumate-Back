@@ -137,7 +137,8 @@ class Login(Resource):
                 'expires_in': 3600,
                 'refresh_expires_in': 1209600,
                 'user_id': str(user['_id']),
-                'nickname': user['nickname']
+                'nickname': user['nickname'],
+                'username': user['username'],
             }
         }, 200
 

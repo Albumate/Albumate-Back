@@ -182,6 +182,7 @@ class AlbumMembers(Resource):
                 result.append({
                     'user_id': str(user['_id']),
                     'nickname': user['nickname'],
+                    'email': user['username'],
                     'joined_at': member['joined_at'].isoformat() + 'Z',
                     'is_owner': (album and album['owner_id'] == user['_id'])
                 })
