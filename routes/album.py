@@ -213,3 +213,17 @@ class LeaveAlbum(Resource):
         })
 
         return make_response(200, '그룹을 나갔습니다.')
+
+@album_ns.route('/<string:album_id>')
+class AlbumDetail(Resource):
+    @token_required
+    def get(self, album_id):
+        album = album_service.collection.find_one({'_id': ObjectId(album_id)})
+        if not album:
+            return make_response(404, "앨범을 찾을 수 없습니다.", None)
+        return make_response(200, "앨범 조회 성공", {
+            "album_id": str(album['_id']),
+            "title": album['title'],
+            "description": album.get('description', ''),
+            "created_at": album['created_at'].isoformat() + 'Z'
+        })
