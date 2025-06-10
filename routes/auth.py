@@ -13,7 +13,8 @@ import logging
 load_dotenv()
 
 auth_ns = Namespace('auth', description='인증 관련 API')
-SECRET_KEY = os.getenv("SECRET_KEY")
+# SECRET_KEY = os.getenv("SECRET_KEY")
+SECRET_KEY = "your-secret-key"
 ACCESS_TOKEN_EXPIRES = int(os.getenv("ACCESS_TOKEN_EXPIRES", 3600))
 REFRESH_TOKEN_EXPIRES = int(os.getenv("REFRESH_TOKEN_EXPIRES", 1209600))
 
