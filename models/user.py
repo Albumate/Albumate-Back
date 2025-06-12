@@ -18,7 +18,7 @@ class User:
         if self.collection.find_one({'username': username}) or self.collection.find_one({'nickname': nickname}):
             return None
 
-        hashed_password = generate_password_hash(password, method="pbkdf2:sha256")
+        hashed_password = generate_password_hash(password)
         user_id = self.collection.insert_one({
             'username': username,
             'password': hashed_password,
