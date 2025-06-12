@@ -173,8 +173,8 @@ class AlbumMembers(Resource):
         - 헤더: Authorization: Bearer {access_token}
         """
         album_oid = ObjectId(album_id)
+        album = album_service.collection.find_one({'_id': album_oid})
         members = album_service.member_collection.find({'album_id': album_oid})
-        
         result = []
         for member in members:
             user = album_service.user_collection.find_one({'_id': member['user_id']})
@@ -182,9 +182,10 @@ class AlbumMembers(Resource):
                 result.append({
                     'user_id': str(user['_id']),
                     'nickname': user['nickname'],
-                    'joined_at': member['joined_at'].isoformat() + 'Z'
+                    'email': user['username'],
+                    'joined_at': member['joined_at'].isoformat() + 'Z',
+                    'is_owner': (album and album['owner_id'] == user['_id'])
                 })
-        
         return make_response(200, '앨범 멤버 목록 조회 완료', result)
 
 @album_ns.route('/<string:album_id>/leave')
@@ -213,3 +214,41 @@ class LeaveAlbum(Resource):
         })
 
         return make_response(200, '그룹을 나갔습니다.')
+
+@album_ns.route('/<string:album_id>')
+class AlbumDetail(Resource):
+    @token_required
+    def get(self, album_id):
+        album = album_service.collection.find_one({'_id': ObjectId(album_id)})
+        if not album:
+            return make_response(404, "앨범을 찾을 수 없습니다.", None)
+        return make_response(200, "앨범 조회 성공", {
+            "album_id": str(album['_id']),
+            "title": album['title'],
+            "description": album.get('description', ''),
+            "created_at": album['created_at'].isoformat() + 'Z',
+            "is_owner": str(album['owner_id']) == str(request.current_user_id),
+            "owner_id": str(album['owner_id'])
+        })
+
+    @token_required
+    def delete(self, album_id):
+        user_id = ObjectId(request.current_user_id)
+        album = album_service.collection.find_one({'_id': ObjectId(album_id)})
+        if not album:
+            return make_response(404, "앨범을 찾을 수 없습니다.", None)
+        if album['owner_id'] != user_id:
+            return make_response(403, "앨범 소유자만 삭제할 수 있습니다.")
+        # 구성원(owner 제외)이 1명 이상이면 삭제 불가
+        member_count = album_service.member_collection.count_documents({
+            'album_id': ObjectId(album_id),
+            'user_id': {'$ne': user_id}
+        })
+        if member_count > 0:
+            return make_response(400, "구성원이 남아있으면 앨범을 삭제할 수 없습니다.")
+        # 앨범, 멤버, 초대, 사진 등 관련 데이터 삭제
+        album_service.collection.delete_one({'_id': ObjectId(album_id)})
+        album_service.member_collection.delete_many({'album_id': ObjectId(album_id)})
+        album_service.invite_collection.delete_many({'album_id': ObjectId(album_id)})
+        # 사진 등 추가 데이터가 있다면 여기도 삭제
+        return make_response(200, "앨범이 삭제되었습니다.")

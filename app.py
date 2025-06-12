@@ -6,6 +6,7 @@ from routes import photo
 from routes import album
 from dotenv import load_dotenv
 import os
+from flask import render_template, send_from_directory
 
 app = Flask(__name__)
 
@@ -42,9 +43,42 @@ api.add_namespace(auth.auth_ns, path='/api/auth')
 api.add_namespace(album.album_ns, path='/api/albums')
 api.add_namespace(photo.photo_ns, path='/api/photos')
 
-@app.route('/')
+# @app.route('/')
+# def home():
+#     return "환영합니다! API 문서는 /swagger/에서 확인하세요."
+
+@app.route("/login")
+def login():
+    return render_template("login.html")
+
+
+@app.route("/signup")
+def signup():
+    return render_template("signup.html")
+
+
+@app.route("/home")
 def home():
-    return "환영합니다! API 문서는 /swagger/에서 확인하세요."
+    return render_template("home.html")
+
+
+@app.route("/album/<album_id>")
+def album_detail_page(album_id):
+    return render_template("album.html", album_id=album_id)
+
+
+@app.route("/photo/<photo_id>")
+def photo_detail_page(photo_id):
+    return render_template("photo.html", photo_id=photo_id)
+
+@app.route("/invitations")
+def invitations_page():
+    return render_template("invitations.html")
+
+@app.route('/uploads/<path:filename>')
+def uploaded_file(filename):
+    uploads_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'uploads'))
+    return send_from_directory(uploads_dir, filename)
 
 if __name__ == '__main__':
     app.run(debug=True)

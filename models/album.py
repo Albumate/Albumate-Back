@@ -1,6 +1,6 @@
 from pymongo import MongoClient
 from bson import ObjectId
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 client = MongoClient('mongodb://localhost:27017/')
@@ -20,14 +20,14 @@ class Album:
             'title': title,
             'description': description,
             'invite_token': invite_token,
-            'created_at': datetime.now(datetime.timezone.utc)
+            'created_at': datetime.now(timezone.utc)
         }
         album_id = self.collection.insert_one(album_doc).inserted_id
 
         self.member_collection.insert_one({
             'album_id': album_id,
             'user_id': ObjectId(owner_id),
-            'joined_at': datetime.now(datetime.timezone.utc)
+            'joined_at': datetime.now(timezone.utc)
         })
 
         users = list(self.user_collection.find({'username': {'$in': invite_emails}}))
@@ -38,7 +38,7 @@ class Album:
                 'from_user_id': ObjectId(owner_id),
                 'invite_token': invite_token,
                 'status': 'pending',
-                'created_at': datetime.now(datetime.timezone.utc)
+                'created_at': datetime.now(timezone.utc)
             })
 
         return {'album_id': str(album_id), 'invite_token': invite_token}
@@ -68,7 +68,7 @@ class Album:
                 'from_user_id': ObjectId(from_user_id),
                 'invite_token': invite_token,
                 'status': 'pending',
-                'created_at': datetime.now(datetime.timezone.utc)
+                'created_at': datetime.now(timezone.utc)
             })
             invited.append(str(user['_id']))
 
