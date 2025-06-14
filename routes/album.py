@@ -1,254 +1,156 @@
-import os
-from flask import request
-from flask_restx import Namespace, Resource, fields
-from bson import ObjectId
-from datetime import datetime
-from models.album import Album
-from .auth import token_required
-from utils.response import make_response
+from flask         import request, g
+from flask_restx   import Namespace, Resource, fields
 
-album_ns = Namespace('albums', description='앨범 관련 API')
-album_service = Album()
+from app                  import mongo
+from models.album         import Album, Invitation, Membership
+from routes.auth          import token_required, error_response
 
-create_album_model = album_ns.model('CreateAlbum', {
-    'title': fields.String(required=True, description='앨범 이름'),
-    'description': fields.String(required=False, description='앨범 설명'),
-    'invite_emails': fields.List(fields.String, required=False, description='초대할 이메일 목록')
+album_ns       = Namespace('albums', description='앨범 관련 API')
+album_svc      = Album(mongo)
+invite_svc     = Invitation(mongo)
+membership_svc = Membership(mongo)
+
+# 입력 DTO
+album_model    = album_ns.model('AlbumDTO', {
+    'title':       fields.String(required=True, example='여행 사진'),
+    'description': fields.String(example='제주도 여행 사진 모음')
 })
-
-invite_model = album_ns.model('InviteUsers', {
-    'invite_emails': fields.List(fields.String, required=True, description='초대할 사용자 이메일 목록')
+# 응답 모델
+album_resp     = album_ns.inherit('AlbumResp', album_model, {
+    'id':           fields.String(example='60af884f4f1c4e3f2c8b4567'),
+    'owner_id':     fields.String(example='60af884f4f1c4e3f2c8b4567'),
+    'created_at':   fields.DateTime(example='2025-06-10T12:00:00Z')
+})
+invite_model   = album_ns.model('InviteDTO', {
+    'user_id':      fields.String(required=True, example='60af884f4f1c4e3f2c8b4567')
+})
+invitation_resp= album_ns.model('InvitationResp', {
+    'invite_token': fields.String(example='abcdef1234'),
+    'album_id':     fields.String(example='60af884f4f1c4e3f2c8b4567'),
+    'inviter_id':   fields.String(example='60af884f4f1c4e3f2c8b4567'),
+    'invitee_id':   fields.String(example='60af884f4f1c4e3f2c8b4567'),
+    'status':       fields.String(example='pending'),
+    'created_at':   fields.DateTime(example='2025-06-10T12:00:00Z')
 })
 
 @album_ns.route('/')
-class AlbumCreate(Resource):
-    @album_ns.doc(security='Bearer Auth')
-    @album_ns.expect(create_album_model)
+class AlbumList(Resource):
+    @album_ns.doc(security='Bearer Auth', description='모든 앨범 조회 (생성일 내림차순)')
+    @album_ns.response(200, '조회 성공', fields.List(fields.Nested(album_resp)))
+    @token_required
+    def get(self):
+        return album_svc.list_all(), 200
+
+    @album_ns.doc(security='Bearer Auth', description='새 앨범 생성')
+    @album_ns.expect(album_model, validate=True)
+    @album_ns.response(201, '생성 성공', album_resp)
     @token_required
     def post(self):
-        user_id = request.current_user_id
-        data = request.json
-        title = data.get('title')
-        description = data.get('description', '')
-        invite_emails = data.get('invite_emails', [])
+        d = request.json
+        new = album_svc.create(g.user_id, d['title'], d.get('description',''))
+        membership_svc.add(new['id'], g.user_id)
+        return new, 201
 
-        result = album_service.create_album(
-            owner_id=user_id,
-            title=title,
-            description=description,
-            invite_emails=invite_emails
-        )
-        return make_response(201, '앨범 생성 및 초대 완료', result)
+@album_ns.route('/<string:user_id>/my')
+class MyAlbums(Resource):
+    @album_ns.doc(security='Bearer Auth', description='내가 소유하거나 참가 중인 앨범 조회')
+    @album_ns.response(200, '조회 성공', fields.List(fields.Nested(album_resp)))
+    @token_required
+    def get(self, user_id):
+        own = album_svc.list_by_owner(user_id)
+        part_ids = membership_svc.list_user_albums(user_id)
+        part = [album_svc.get(aid) for aid in part_ids if album_svc.get(aid)]
+        combined = {a['id']: a for a in (own + part)}.values()
+        return list(combined), 200
 
 @album_ns.route('/<string:album_id>/invite')
 class AlbumInvite(Resource):
-    @album_ns.doc(security='Bearer Auth')
-    @album_ns.expect(invite_model)
+    @album_ns.doc(security='Bearer Auth', description='다른 사용자를 앨범에 초대')
+    @album_ns.expect(invite_model, validate=True)
+    @album_ns.response(201, '초대 성공', fields.String(description='invite_token'))
+    @album_ns.response(404, '앨범 없음', error_response)
     @token_required
     def post(self, album_id):
-        user_id = request.current_user_id
-        data = request.json
-        invite_emails = data.get('invite_emails', [])
-
-        result = album_service.invite_users(
-            album_id=album_id,
-            from_user_id=user_id,
-            invite_emails=invite_emails
-        )
-
-        return make_response(200, '초대 요청 완료', result)
+        if not album_svc.get(album_id):
+            return {'code':404,'message':'앨범을 찾을 수 없습니다.'}, 404
+        token = invite_svc.create(album_id, g.user_id, request.json['user_id'])
+        return {'invite_token': token}, 201
 
 @album_ns.route('/invitations')
-class AlbumInvitations(Resource):
-    @album_ns.doc(security='Bearer Auth')
+class InvitationsList(Resource):
+    @album_ns.doc(security='Bearer Auth', description='내가 받은 모든 초대 조회')
+    @album_ns.response(200, '조회 성공', fields.List(fields.Nested(invitation_resp)))
     @token_required
     def get(self):
-        user_id = ObjectId(request.current_user_id)
-        invites = album_service.invite_collection.aggregate([
-            {'$match': {'to_user_id': user_id, 'status': 'pending'}},
-            {'$lookup': {
-                'from': 'albums',
-                'localField': 'album_id',
-                'foreignField': '_id',
-                'as': 'album_info'
-            }},
-            {'$unwind': '$album_info'},
-            {'$lookup': {
-                'from': 'users',
-                'localField': 'from_user_id',
-                'foreignField': '_id',
-                'as': 'from_user'
-            }},
-            {'$unwind': '$from_user'},
-            {'$project': {
-                '_id': 0,
-                'album_id': {'$toString': '$album_id'},
-                'invite_token': 1,
-                'from_user': {
-                    'user_id': {'$toString': '$from_user._id'},
-                    'nickname': '$from_user.nickname'
-                },
-                'album': {
-                    'title': '$album_info.title',
-                    'description': '$album_info.description'
-                },
-                'created_at': 1
-            }}
-        ])
-        return make_response(200, '초대 목록 조회 완료', list(invites))
+        return invite_svc.list_for_user(g.user_id), 200
 
-@album_ns.route('/invitations/<string:invite_token>/accept')
-class AcceptInvitation(Resource):
-    @album_ns.doc(security='Bearer Auth')
+@album_ns.route('/invitations/<string:token>/accept')
+class InvitationAccept(Resource):
+    @album_ns.doc(security='Bearer Auth', description='초대 수락')
+    @album_ns.response(200, '수락 성공')
+    @album_ns.response(404, '초대 없음', error_response)
     @token_required
-    def post(self, invite_token):
-        user_id = ObjectId(request.current_user_id)
-        album_doc = album_service.invite_collection.find_one({
-            'invite_token': invite_token,
-            'to_user_id': user_id,
-            'status': 'pending'
-        })
+    def post(self, token):
+        inv = invite_svc.get_by_token(token)
+        if not inv or str(inv['invitee_id']) != g.user_id:
+            return {'code':404,'message':'초대를 찾을 수 없습니다.'}, 404
+        invite_svc.update_status(token, 'accepted')
+        membership_svc.add(inv['album_id'], g.user_id)
+        return {'code':200,'message':'수락되었습니다.'}, 200
 
-        if not album_doc:
-            return make_response(404, '유효하지 않은 초대입니다.')
-
-        album_service.member_collection.insert_one({
-            'album_id': album_doc['album_id'],
-            'user_id': user_id,
-            'joined_at': datetime.utcnow()
-        })
-
-        album_service.invite_collection.update_one(
-            {'_id': album_doc['_id']},
-            {'$set': {'status': 'accepted'}}
-        )
-
-        return make_response(200, '초대를 수락했습니다.', {
-            'album_id': str(album_doc['album_id'])
-        })
-
-@album_ns.route('/invitations/<string:invite_token>/reject')
-class RejectInvitation(Resource):
-    @album_ns.doc(security='Bearer Auth')
+@album_ns.route('/invitations/<string:token>/reject')
+class InvitationReject(Resource):
+    @album_ns.doc(security='Bearer Auth', description='초대 거절')
+    @album_ns.response(200, '거절 성공')
+    @album_ns.response(404, '초대 없음', error_response)
     @token_required
-    def post(self, invite_token):
-        user_id = ObjectId(request.current_user_id)
-        result = album_service.invite_collection.update_one(
-            {'invite_token': invite_token, 'to_user_id': user_id, 'status': 'pending'},
-            {'$set': {'status': 'rejected'}}
-        )
+    def post(self, token):
+        inv = invite_svc.get_by_token(token)
+        if not inv or str(inv['invitee_id']) != g.user_id:
+            return {'code':404,'message':'초대를 찾을 수 없습니다.'}, 404
+        invite_svc.update_status(token, 'rejected')
+        return {'code':200,'message':'거절되었습니다.'}, 200
 
-        if result.matched_count == 0:
-            return make_response(404, '거절할 초대가 없습니다.')
-
-        return make_response(200, '초대를 거절했습니다.')
-    
-@album_ns.route('/<string:user_id>/my')
-@album_ns.param('user_id', '조회할 유저의 고유 ID')
-class UserAlbums(Resource):
-    @album_ns.doc(security='Bearer Auth')
-    @token_required
-    def get(self, user_id):
-        """
-        특정 유저가 생성했거나 멤버로 속한 앨범 목록 조회
-        - 헤더: Authorization: Bearer {access_token}
-        - 경로 파라미터: user_id
-        """
-        try:
-            user_id = ObjectId(user_id)
-        except Exception as e:
-            return make_response(400, f'유효하지 않은 user_id: {str(e)}')
-
-        albums = album_service.get_user_albums(user_id)
-        return make_response(200, f'{user_id}의 앨범 목록 조회 성공', albums)
-    
 @album_ns.route('/<string:album_id>/members')
-@album_ns.param('album_id', '조회할 앨범의 고유 ID')
 class AlbumMembers(Resource):
-    @album_ns.doc(security='Bearer Auth')
+    @album_ns.doc(security='Bearer Auth', description='앨범 멤버 목록 조회')
+    @album_ns.response(200, '조회 성공', fields.List(fields.String))
+    @album_ns.response(404, '앨범 없음', error_response)
     @token_required
     def get(self, album_id):
-        """
-        특정 앨범에 속한 멤버 목록 조회
-        - 헤더: Authorization: Bearer {access_token}
-        """
-        album_oid = ObjectId(album_id)
-        album = album_service.collection.find_one({'_id': album_oid})
-        members = album_service.member_collection.find({'album_id': album_oid})
-        result = []
-        for member in members:
-            user = album_service.user_collection.find_one({'_id': member['user_id']})
-            if user:
-                result.append({
-                    'user_id': str(user['_id']),
-                    'nickname': user['nickname'],
-                    'email': user['username'],
-                    'joined_at': member['joined_at'].isoformat() + 'Z',
-                    'is_owner': (album and album['owner_id'] == user['_id'])
-                })
-        return make_response(200, '앨범 멤버 목록 조회 완료', result)
+        if not album_svc.get(album_id):
+            return {'code':404,'message':'앨범을 찾을 수 없습니다.'}, 404
+        return membership_svc.list_members(album_id), 200
 
 @album_ns.route('/<string:album_id>/leave')
-@album_ns.param('album_id', '나갈 앨범의 고유 ID')
-class LeaveAlbum(Resource):
-    @album_ns.doc(security='Bearer Auth')
+class AlbumLeave(Resource):
+    @album_ns.doc(security='Bearer Auth', description='앨범에서 나가기')
+    @album_ns.response(200, '나가기 성공')
+    @album_ns.response(404, '앨범 없음', error_response)
     @token_required
     def post(self, album_id):
-        """
-        앨범에서 나가기
-        - 헤더: Authorization: Bearer {access_token}
-        """
-        user_id = ObjectId(request.current_user_id)
-
-        member = album_service.member_collection.find_one({
-            'album_id': ObjectId(album_id),
-            'user_id': user_id
-        })
-
-        if not member:
-            return make_response(404, '해당 앨범의 멤버가 아닙니다.')
-
-        album_service.member_collection.delete_one({
-            'album_id': ObjectId(album_id),
-            'user_id': user_id
-        })
-
-        return make_response(200, '그룹을 나갔습니다.')
+        if not album_svc.get(album_id):
+            return {'code':404,'message':'앨범을 찾을 수 없습니다.'}, 404
+        membership_svc.remove(album_id, g.user_id)
+        return {'code':200,'message':'나갔습니다.'}, 200
 
 @album_ns.route('/<string:album_id>')
 class AlbumDetail(Resource):
+    @album_ns.doc(security='Bearer Auth', description='단일 앨범 상세 조회')
+    @album_ns.response(200, '조회 성공', album_resp)
+    @album_ns.response(404, '앨범 없음', error_response)
     @token_required
     def get(self, album_id):
-        album = album_service.collection.find_one({'_id': ObjectId(album_id)})
-        if not album:
-            return make_response(404, "앨범을 찾을 수 없습니다.", None)
-        return make_response(200, "앨범 조회 성공", {
-            "album_id": str(album['_id']),
-            "title": album['title'],
-            "description": album.get('description', ''),
-            "created_at": album['created_at'].isoformat() + 'Z',
-            "is_owner": str(album['owner_id']) == str(request.current_user_id),
-            "owner_id": str(album['owner_id'])
-        })
+        a = album_svc.get(album_id)
+        if not a:
+            return {'code':404,'message':'앨범을 찾을 수 없습니다.'}, 404
+        return a, 200
 
+    @album_ns.doc(security='Bearer Auth', description='단일 앨범 삭제')
+    @album_ns.response(204, '삭제 성공')
+    @album_ns.response(404, '앨범 없음', error_response)
     @token_required
     def delete(self, album_id):
-        user_id = ObjectId(request.current_user_id)
-        album = album_service.collection.find_one({'_id': ObjectId(album_id)})
-        if not album:
-            return make_response(404, "앨범을 찾을 수 없습니다.", None)
-        if album['owner_id'] != user_id:
-            return make_response(403, "앨범 소유자만 삭제할 수 있습니다.")
-        # 구성원(owner 제외)이 1명 이상이면 삭제 불가
-        member_count = album_service.member_collection.count_documents({
-            'album_id': ObjectId(album_id),
-            'user_id': {'$ne': user_id}
-        })
-        if member_count > 0:
-            return make_response(400, "구성원이 남아있으면 앨범을 삭제할 수 없습니다.")
-        # 앨범, 멤버, 초대, 사진 등 관련 데이터 삭제
-        album_service.collection.delete_one({'_id': ObjectId(album_id)})
-        album_service.member_collection.delete_many({'album_id': ObjectId(album_id)})
-        album_service.invite_collection.delete_many({'album_id': ObjectId(album_id)})
-        # 사진 등 추가 데이터가 있다면 여기도 삭제
-        return make_response(200, "앨범이 삭제되었습니다.")
+        if not album_svc.delete(album_id):
+            return {'code':404,'message':'앨범을 찾을 수 없습니다.'}, 404
+        return '', 204

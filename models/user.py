@@ -1,35 +1,39 @@
-from pymongo import MongoClient
 from werkzeug.security import generate_password_hash, check_password_hash
-
-client = MongoClient('mongodb://localhost:27017/')
-db = client['albumate']
+from bson import ObjectId
 
 class User:
-    def __init__(self):
-        self.collection = db['users']
+    def __init__(self, mongo):
+        self.collection = mongo.db.users
 
-    def find_by_username(self, username):
+    def find_by_username(self, username: str):
         return self.collection.find_one({'username': username})
 
-    def find_by_nickname(self, nickname):
+    def find_by_nickname(self, nickname: str):
         return self.collection.find_one({'nickname': nickname})
 
-    def create_user(self, username, password, nickname):
-        if self.collection.find_one({'username': username}) or self.collection.find_one({'nickname': nickname}):
+    def find_by_id(self, user_id: str):
+        doc = self.collection.find_one({'_id': ObjectId(user_id)})
+        if not doc:
             return None
+        return {
+            'user_id': str(doc['_id']),
+            'username': doc['username'],
+            'nickname': doc['nickname']
+        }
 
-        hashed_password = generate_password_hash(password)
-        user_id = self.collection.insert_one({
+    def create_user(self, username: str, password: str, nickname: str) -> str | None:
+        if self.find_by_username(username) or self.find_by_nickname(nickname):
+            return None
+        hashed = generate_password_hash(password)
+        res = self.collection.insert_one({
             'username': username,
-            'password': hashed_password,
+            'password': hashed,
             'nickname': nickname
-        }).inserted_id
-        return str(user_id)
+        })
+        return str(res.inserted_id)
 
-    def verify_user(self, username, password):
+    def verify_user(self, username: str, password: str) -> dict | None:
         user = self.find_by_username(username)
-        if not user:
-            return None
-        if not check_password_hash(user['password'], password):
+        if not user or not check_password_hash(user['password'], password):
             return None
         return user

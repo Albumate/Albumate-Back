@@ -1,0 +1,44 @@
+version: "3.8"
+
+services:
+  mongo:
+    image: mongo:4.4
+    restart: always
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - "27017:27017"
+
+  api:
+    build:
+      context: ./Albumate-Back
+      dockerfile: Dockerfile
+      args:
+        - ENV=production
+    image: albumate-back:latest
+    depends_on:
+      - mongo
+    environment:
+      MONGODB_URI: mongodb://mongo:27017/albumate
+      SECRET_KEY: mySuperSecretKey123
+      ACCESS_TOKEN_EXPIRES: 3600
+      REFRESH_TOKEN_EXPIRES: 1209600
+    ports:
+      - "5050:5050"
+    restart: always
+
+  front:
+    build:
+      context: ./Albumate-Front
+      dockerfile: Dockerfile
+    image: albumate-front:latest
+    depends_on:
+      - api
+    environment:
+      REACT_APP_API_URL: http://api:5050  # (or whatever your front needs)
+    ports:
+      - "6000:6000"
+    restart: always
+
+volumes:
+  mongo_data:

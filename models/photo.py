@@ -1,41 +1,68 @@
-from pymongo import MongoClient
-from bson import ObjectId
-import datetime
 import os
-
-MONGO_URI = os.getenv('MONGODB_URI', 'mongodb://localhost:27017/')
-client = MongoClient(MONGO_URI)
-db = client['albumate']
+import datetime
+from bson import ObjectId
+from flask import url_for, current_app
 
 class Photo:
-    def __init__(self):
-        self.collection = db['photos']
+    def __init__(self, mongo):
+        self.collection = mongo.db.photos
 
-    def create(self, album_id, user_id, filename, original_filename):
+    def upload(self, file_storage, album_id: str) -> dict:
+        now = datetime.datetime.utcnow()
+        filename = f"{now.timestamp()}_{file_storage.filename}"
+        upload_dir = os.path.join(current_app.root_path, 'uploads')
+        os.makedirs(upload_dir, exist_ok=True)
+
+        save_path = os.path.join(upload_dir, filename)
+        file_storage.save(save_path)
+
+        public_url = url_for('static', filename=filename, _external=True)
         doc = {
-            'album_id': album_id,
-            'user_id': user_id,
             'filename': filename,
-            'original_filename': original_filename,
-            'created_at': datetime.datetime.utcnow()
+            'url': public_url,
+            'album_id': album_id,
+            'uploaded_at': now
         }
-        result = self.collection.insert_one(doc)
-        return str(result.inserted_id)
+        res = self.collection.insert_one(doc)
+        return {
+            'id': str(res.inserted_id),
+            'filename': filename,
+            'url': public_url,
+            'album_id': album_id,
+            'uploaded_at': now.isoformat() + 'Z'
+        }
 
-    def find_by_id(self, photo_id):
-        try:
-            oid = ObjectId(photo_id)
-        except:
+    def list_by_album(self, album_id: str) -> list[dict]:
+        out = []
+        for doc in self.collection.find({'album_id': album_id}).sort('uploaded_at', -1):
+            out.append({
+                'id': str(doc['_id']),
+                'filename': doc['filename'],
+                'url': doc['url'],
+                'album_id': doc['album_id'],
+                'uploaded_at': doc['uploaded_at'].isoformat() + 'Z'
+            })
+        return out
+
+    def get(self, photo_id: str) -> dict | None:
+        doc = self.collection.find_one({'_id': ObjectId(photo_id)})
+        if not doc:
             return None
-        return self.collection.find_one({'_id': oid})
+        return {
+            'id': str(doc['_id']),
+            'filename': doc['filename'],
+            'url': doc['url'],
+            'album_id': doc['album_id'],
+            'uploaded_at': doc['uploaded_at'].isoformat() + 'Z'
+        }
 
-    def find_by_album(self, album_id):
-        return list(self.collection.find({'album_id': album_id}))
-
-    def delete(self, photo_id):
-        try:
-            oid = ObjectId(photo_id)
-        except:
+    def delete(self, photo_id: str) -> bool:
+        doc = self.collection.find_one({'_id': ObjectId(photo_id)})
+        if not doc:
             return False
-        result = self.collection.delete_one({'_id': oid})
-        return result.deleted_count == 1
+        try:
+            os.remove(os.path.join(current_app.root_path, 'uploads', doc['filename']))
+        except:
+            pass
+        res = self.collection.delete_one({'_id': ObjectId(photo_id)})
+        return res.deleted_count == 1
