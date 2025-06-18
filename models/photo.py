@@ -7,7 +7,7 @@ class Photo:
     def __init__(self, mongo):
         self.collection = mongo.db.photos
 
-    def upload(self, file_storage, album_id: str) -> dict:
+    def upload(self, file_storage, album_id: str, uploader_id: str) -> dict:
         now = datetime.datetime.utcnow()
         filename = f"{now.timestamp()}_{file_storage.filename}"
         upload_dir = os.path.join(current_app.root_path, 'uploads')
@@ -18,29 +18,33 @@ class Photo:
 
         public_url = url_for('static', filename=filename, _external=True)
         doc = {
-            'filename': filename,
-            'url': public_url,
-            'album_id': album_id,
-            'uploaded_at': now
+            'filename':     filename,
+            'url':          public_url,
+            'album_id':     album_id,
+            'uploader_id':  ObjectId(uploader_id),
+            'uploaded_at':  now
         }
         res = self.collection.insert_one(doc)
         return {
-            'id': str(res.inserted_id),
-            'filename': filename,
-            'url': public_url,
-            'album_id': album_id,
-            'uploaded_at': now.isoformat() + 'Z'
+            'id':           str(res.inserted_id),
+            'filename':     filename,
+            'url':          public_url,
+            'album_id':     album_id,
+            'uploader_id':  uploader_id,
+            'uploaded_at':  now.isoformat() + 'Z'
         }
 
     def list_by_album(self, album_id: str) -> list[dict]:
         out = []
-        for doc in self.collection.find({'album_id': album_id}).sort('uploaded_at', -1):
+        cursor = self.collection.find({'album_id': album_id}).sort('uploaded_at', -1)
+        for doc in cursor:
             out.append({
-                'id': str(doc['_id']),
-                'filename': doc['filename'],
-                'url': doc['url'],
-                'album_id': doc['album_id'],
-                'uploaded_at': doc['uploaded_at'].isoformat() + 'Z'
+                'id':           str(doc['_id']),
+                'filename':     doc['filename'],
+                'url':          doc['url'],
+                'album_id':     doc['album_id'],
+                'uploader_id':  str(doc.get('uploader_id')),
+                'uploaded_at':  doc['uploaded_at'].isoformat() + 'Z'
             })
         return out
 
@@ -49,11 +53,12 @@ class Photo:
         if not doc:
             return None
         return {
-            'id': str(doc['_id']),
-            'filename': doc['filename'],
-            'url': doc['url'],
-            'album_id': doc['album_id'],
-            'uploaded_at': doc['uploaded_at'].isoformat() + 'Z'
+            'id':           str(doc['_id']),
+            'filename':     doc['filename'],
+            'url':          doc['url'],
+            'album_id':     doc['album_id'],
+            'uploader_id':  str(doc.get('uploader_id')),
+            'uploaded_at':  doc['uploaded_at'].isoformat() + 'Z'
         }
 
     def delete(self, photo_id: str) -> bool:
