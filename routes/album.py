@@ -4,11 +4,14 @@ from flask_restx   import Namespace, Resource, fields
 from app                  import mongo
 from models.album         import Album, Invitation, Membership
 from routes.auth          import token_required, error_response
+from models.photo        import Photo
+from routes.photo        import photo_resp
 
 album_ns       = Namespace('albums', description='앨범 관련 API')
 album_svc      = Album(mongo)
 invite_svc     = Invitation(mongo)
 membership_svc = Membership(mongo)
+photo_svc = Photo(mongo)
 
 # 입력 DTO
 album_model    = album_ns.model('AlbumDTO', {
@@ -154,3 +157,26 @@ class AlbumDetail(Resource):
         if not album_svc.delete(album_id):
             return {'code':404,'message':'앨범을 찾을 수 없습니다.'}, 404
         return '', 204
+
+@album_ns.route('/<string:album_id>/latest-photo')
+class AlbumLatestPhoto(Resource):
+    @album_ns.doc(
+        security='Bearer Auth',
+        description='단일 앨범 내에서 가장 최근 업로드된 사진 한 건 조회'
+    )
+    @album_ns.response(200, '조회 성공', photo_resp)
+    @album_ns.response(404, '앨범이 없거나 사진이 없습니다.', error_response)
+    @token_required
+    def get(self, album_id):
+        # 앨범 존재 여부 확인
+        if not album_svc.get(album_id):
+            return {'code':404, 'message':'앨범을 찾을 수 없습니다.'}, 404
+
+        # 사진 메타데이터 리스트를 업로드 시간 내림차순으로 가져옴
+        photos = photo_svc.list_by_album(album_id)
+        if not photos:
+            return {'code':404, 'message':'해당 앨범에 업로드된 사진이 없습니다.'}, 404
+
+        # 가장 첫 번째가 최신
+        latest = photos[0]
+        return latest, 200
