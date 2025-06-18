@@ -5,6 +5,7 @@ from app                  import mongo
 from models.album         import Album, Invitation, Membership
 from routes.auth          import token_required, error_response
 from models.photo        import Photo
+from models.user         import User
 from routes.photo        import photo_resp
 
 album_ns       = Namespace('albums', description='앨범 관련 API')
@@ -25,7 +26,7 @@ album_resp     = album_ns.inherit('AlbumResp', album_model, {
     'created_at':   fields.DateTime(example='2025-06-10T12:00:00Z')
 })
 invite_model   = album_ns.model('InviteDTO', {
-    'user_id':      fields.String(required=True, example='60af884f4f1c4e3f2c8b4567')
+     'email':        fields.String(required=True, example='abc@abc.com', description='초대할 회원의 이메일 주소')
 })
 invitation_resp= album_ns.model('InvitationResp', {
     'invite_token': fields.String(example='abcdef1234'),
@@ -66,18 +67,26 @@ class MyAlbums(Resource):
         combined = {a['id']: a for a in (own + part)}.values()
         return list(combined), 200
 
+
 @album_ns.route('/<string:album_id>/invite')
 class AlbumInvite(Resource):
-    @album_ns.doc(security='Bearer Auth', description='다른 사용자를 앨범에 초대')
+    @album_ns.doc(security='Bearer Auth')
     @album_ns.expect(invite_model, validate=True)
-    @album_ns.response(201, '초대 성공', fields.String(description='invite_token'))
-    @album_ns.response(404, '앨범 없음', error_response)
+    @album_ns.response(201,'초대 성공', fields.String(description='invite_token'))
+    @album_ns.response(404,'앨범 없음 or 회원 없음', error_response)
     @token_required
     def post(self, album_id):
         if not album_svc.get(album_id):
-            return {'code':404,'message':'앨범을 찾을 수 없습니다.'}, 404
-        token = invite_svc.create(album_id, g.user_id, request.json['user_id'])
-        return {'invite_token': token}, 201
+            return {'code':404,'message':'앨범을 찾을 수 없습니다.'},404
+
+        # 이메일로 회원 조회
+        invitee = User(mongo).find_by_username(request.json['email'])
+        if not invitee:
+            return {'code':404,'message':'해당 이메일의 회원을 찾을 수 없습니다.'},404
+
+        # 토큰 생성
+        token = invite_svc.create(album_id, g.user_id, str(invitee['_id']))
+        return {'invite_token': token},201
 
 @album_ns.route('/invitations')
 class InvitationsList(Resource):
