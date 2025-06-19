@@ -10,7 +10,7 @@ class Photo:
     def upload(self, file_storage, album_id: str, uploader_id: str) -> dict:
         now = datetime.datetime.utcnow()
         filename = f"{now.timestamp()}_{file_storage.filename}"
-        upload_dir = os.path.join(current_app.root_path, 'uploads')
+        upload_dir = os.path.join(current_app.root_path, 'static')
         os.makedirs(upload_dir, exist_ok=True)
 
         save_path = os.path.join(upload_dir, filename)
